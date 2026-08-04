@@ -5,7 +5,9 @@ OpenAI-compatible chat-completions endpoint.
 Fires N byte-identical requests and reports, per call and in aggregate:
 
   * the `model` string the server echoed back
-  * the `system_fingerprint` field, if the server sets one
+  * the `system_fingerprint` field, if the server sets one -- and separately
+    whether the key is present in the body at all, which a defaulting read
+    cannot distinguish from a null value
   * the `x-request-id` response header and the body's `id`
   * wall-clock latency
   * whether the answer text was stable across identical requests
@@ -250,6 +252,14 @@ def main():
             "response_id": (body or {}).get("id"),
             "model": (body or {}).get("model"),
             "system_fingerprint": (body or {}).get("system_fingerprint"),
+            # `.get()` returns None both for a key that is present and null and
+            # for one that is absent from the body, and those are different
+            # facts about an API. Reporting "null on every response" off a
+            # defaulting read overstates what was measured, so record which of
+            # the two it actually was.
+            "system_fingerprint_key_present": (
+                "system_fingerprint" in body if isinstance(body, dict) else None
+            ),
         }
         # `is not None`, not a truth test: an empty JSON object is falsy, and
         # treating it as "no body" left `text` unset on a 200 response, which
@@ -335,8 +345,19 @@ def main():
     print(f"\n`system_fingerprint` values: "
           + ", ".join(f"{v!r} x{n}" for v, n in fps.most_common()))
     if set(fps) == {None}:
-        print("    -> not implemented by this endpoint: there is no build identifier")
-        print("       to pin an evaluation to, independent of the `model` string above.")
+        present = Counter(c.get("system_fingerprint_key_present") for c in ok)
+        if set(present) == {True}:
+            how = "the key is present on every response and always null"
+        elif set(present) == {False}:
+            how = "the key is absent from every response body"
+        elif set(present) == {None}:
+            how = "key presence not recorded; these records predate script 1.3"
+        else:
+            how = (f"key present on {present.get(True, 0)} response(s), "
+                   f"absent on {present.get(False, 0)}")
+        print(f"    -> no value on any successful response ({how}).")
+        print("       There is no build identifier to pin an evaluation to,")
+        print("       independent of the `model` string above.")
 
     rids = [c["request_id"] for c in ok if c["request_id"]]
     print(f"\n`x-request-id` present on {len(rids)}/{len(ok)} successful responses"
@@ -415,7 +436,7 @@ def main():
                     "prompt": args.prompt, "max_tokens": args.max_tokens,
                     "temperature": args.temperature,
                     "started_unix": t_start, "duration_s": duration,
-                    "script_version": "1.2",
+                    "script_version": "1.3",
                     "attempted": len(calls),
                     "aborted": aborted,
                 },

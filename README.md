@@ -38,7 +38,7 @@ Four arms of 60 calls, each arm holding one request completely fixed.
 | `mercury-2` label share | 16/60 | 14/60 | 7/60 | 9/60 |
 | label transitions | 19 | 22 | 14 | 16 |
 | runs-test *z* | −1.49 | +0.20 | +1.06 | +0.36 |
-| `system_fingerprint` | null ×60 | null ×60 | null ×60 | null ×60 |
+| `system_fingerprint` | no value ×60 | no value ×60 | no value ×60 | no value ×60 |
 | `x-request-id` | 60/60 unique | 60/60 unique | 60/60 unique | 60/60 unique |
 | distinct answers | not measured¹ | not measured¹ | 1 | 2 |
 | median latency | 0.388 s | 0.417 s | 0.472 s | 0.603 s |
@@ -77,11 +77,23 @@ looks like an epoch boundary.
 timestamp split of a run's records can attribute an output to a backend, and a
 re-run cannot be constrained to the same one.
 
-## Finding 2 — `system_fingerprint` is present in the schema and null on every response
+## Finding 2 — no `system_fingerprint` value comes back on any response
 
-Null on all 240 responses. This is the standard OpenAI-compatible field a
-client would otherwise use to pin a served configuration, so with finding 1
-there is no remaining mechanism for identifying what produced a result.
+Reading `system_fingerprint` from the response body produced no value on all
+240 calls.
+
+That sentence is deliberately weaker than the one it replaces. The probe read
+the field with a defaulting lookup, which returns the same thing whether the
+key is present and null or absent from the body altogether, so the records in
+`data/` cannot tell those two states apart. Version 1.3 of the script captures
+the distinction explicitly, so a re-run settles it. Inception's published
+response schema does not list the field, which points at "absent", but I have
+not confirmed that against a raw body and am not asserting it.
+
+The consequence is the same under either answer, which is why this is still a
+finding: it is the standard OpenAI-compatible field a client reaches for to pin
+a served configuration, there is nothing in it, and with finding 1 no mechanism
+remains for identifying what produced a result.
 
 ## Finding 3 — an identical request does not always return identical bytes
 
@@ -129,6 +141,11 @@ replicated out of sample is only the narrower output-side statement above.
 `data/` can therefore be located in provider-side logs, which is what makes
 these records useful to anyone able to look at the other end.
 
+It is the one field here that already does its job, and it is not mentioned in
+the public documentation — so a client has no basis for relying on it and no
+way to know it is there. Documenting it would cost a paragraph and is the
+cheapest item on this page.
+
 ## Three suggestions, ranked by implementation cost
 
 1. **Stabilize the `model` string, or document what it means.** By far the
@@ -138,15 +155,22 @@ these records useful to anyone able to look at the other end.
    than a version identifier would be a large improvement over clients
    inferring it from record dumps.
 
-2. **Populate `system_fingerprint`.** The field already exists in the
-   response. Filling it with a value that changes when the served
-   configuration changes gives clients a pinnable identity without committing
-   the provider to version stability, which is the harder promise.
+2. **Return a populated `system_fingerprint`.** OpenAI-compatible clients
+   already reach for this field and find nothing in it. A value that changes
+   when the served configuration changes gives clients a pinnable identity
+   without committing the provider to version stability, which is the harder
+   promise. If the field is currently absent rather than null, adding it is
+   the same piece of work.
 
 3. **Offer a deterministic option** — `temperature=0`, a `seed`, or an
    equivalent. The most engineering work and the largest unlock: without one
    of them, no client can make output reproducible, which rules the model out
-   of every role where responses are cached, hashed, or replayed.
+   of every role where responses are cached, hashed, or replayed. Worth noting
+   that the documented handling of an out-of-range `temperature` is a reset to
+   0.75 with a `warning` in the response — so a client that passes 0 hoping for
+   determinism is not refused, it is moved to the middle of the sampling range.
+   I did not test that; all four arms omitted `temperature` and took the server
+   default.
 
 ## Reproducing this
 
