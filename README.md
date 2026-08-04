@@ -77,23 +77,23 @@ looks like an epoch boundary.
 timestamp split of a run's records can attribute an output to a backend, and a
 re-run cannot be constrained to the same one.
 
-## Finding 2 — no `system_fingerprint` value comes back on any response
+## Finding 2 — there is no `system_fingerprint` field in the response
 
-Reading `system_fingerprint` from the response body produced no value on all
-240 calls.
+No value came back on any of the 240 calls. The probe originally read the field
+with a defaulting lookup, which returns the same thing whether the key is
+present and null or missing from the body altogether, so the records in `data/`
+cannot separate those two cases. Version 1.3 records the distinction, and a
+call under 1.3 resolves it: **the key is absent from the response body**. That
+is consistent with a published response schema which does not list the field.
 
-That sentence is deliberately weaker than the one it replaces. The probe read
-the field with a defaulting lookup, which returns the same thing whether the
-key is present and null or absent from the body altogether, so the records in
-`data/` cannot tell those two states apart. Version 1.3 of the script captures
-the distinction explicitly, so a re-run settles it. Inception's published
-response schema does not list the field, which points at "absent", but I have
-not confirmed that against a raw body and am not asserting it.
+Two limits on that resolution, since finding 1 constrains what a single call
+can establish. It is one call, and it returned under the
+`inception/mercury-2-prod-h100` label — so I have not observed a body under the
+`mercury-2` label at 1.3 and am not claiming the two return the same shape.
 
-The consequence is the same under either answer, which is why this is still a
-finding: it is the standard OpenAI-compatible field a client reaches for to pin
-a served configuration, there is nothing in it, and with finding 1 no mechanism
-remains for identifying what produced a result.
+The consequence holds regardless: this is the standard OpenAI-compatible field
+a client reaches for to pin a served configuration, there is nothing there, and
+with finding 1 no mechanism remains for identifying what produced a result.
 
 ## Finding 3 — an identical request does not always return identical bytes
 
@@ -155,12 +155,10 @@ cheapest item on this page.
    than a version identifier would be a large improvement over clients
    inferring it from record dumps.
 
-2. **Return a populated `system_fingerprint`.** OpenAI-compatible clients
-   already reach for this field and find nothing in it. A value that changes
-   when the served configuration changes gives clients a pinnable identity
-   without committing the provider to version stability, which is the harder
-   promise. If the field is currently absent rather than null, adding it is
-   the same piece of work.
+2. **Add a populated `system_fingerprint`.** OpenAI-compatible clients reach
+   for this field by default and it is not there. A value that changes when the
+   served configuration changes gives clients a pinnable identity without
+   committing the provider to version stability, which is the harder promise.
 
 3. **Offer a deterministic option** — `temperature=0`, a `seed`, or an
    equivalent. The most engineering work and the largest unlock: without one
